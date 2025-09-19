@@ -1,15 +1,24 @@
 ﻿#!/usr/bin/env python3
 import argparse
+import datetime
+from enum import Enum
 import os
 import subprocess
 import time
 import logging
 from email.mime.text import MIMEText
 
+class LogLevel(Enum):
+    DEBUG = logging.DEBUG
+    INFO = logging.INFO
+    WARNING = logging.WARNING
+    ERROR = logging.ERROR
+    CRITICAL = logging.CRITICAL
+    
 # ----------------------------------------
-# Retry with exponential base^n backoff
+# Retry with periodically exponential base_delay^attempts backoff
 # ----------------------------------------
-def retry(func, max_attempts, base_delay, task_name="task"):
+def retry(func: function, max_attempts: int, base_delay: int,  logger: logging.Logger, task_name="task"):
     attempts = 0
     while attempts < max_attempts:
         try:
@@ -17,14 +26,14 @@ def retry(func, max_attempts, base_delay, task_name="task"):
         except Exception as e:
             attempts += 1
             delay = base_delay ** attempts
-            logging.warning(f"{task_name} failed (attempt {attempts}/{max_attempts}): {e}")
+            try_log(logger, f"{task_name} failed (attempt {attempts}/{max_attempts}): {e}", LogLevel.WARNING)
             time.sleep(delay)
     raise RuntimeError(f"{task_name} failed after {max_attempts} attempts")
 
 # ----------------------------------------
 # Git + Docker logic
 # ----------------------------------------
-def git_pull(repo_dir, branch, remote):
+def git_pull(repo_dir: str, branch: str, remote: str):
     def _pull():
         result = subprocess.run(
             ["git", "pull", remote, branch],
@@ -51,22 +60,31 @@ def docker_compose_up(repo_dir):
     return _compose
 
 # ----------------------------------------
-# Error handling
+# Error handling: safe try
 # ----------------------------------------
-def send_email(error_msg: str, subject: str, email_recipient: str, email_sender: str):
-    missing = {
-        "error_msg": error_msg,
-        "email_recipient": email_recipient,
-        "subject": subject,
-        "email_sender": email_sender,
-    }
+def try_log(logger : logging.Logger, message: str, level: LogLevel):
+    try:
+        match level:
+            case LogLevel.DEBUG:
+                logger.debug(message)
+            case LogLevel.INFO:
+                logger.info(message)
+            case LogLevel.WARNING:
+                logger.warning(message)
+            case LogLevel.ERROR:
+                logger.error(message)
+            case LogLevel.CRITICAL:
+                logger.critical(message)
+            case _:
+                logger.log(logging.NOTSET, message)
+    except Exception as e:
+        print(f"Failed to log with exception: {e}")
+        print(f"{datetime.now().strftime("%Y-%m-%d %H:%M:%S")} {message}")
 
-    if not all(missing.values()):
-        for name, value in missing.items():
-            if not value:
-                logging.error(f"missing parameter {name}")
-        return
-
+# ----------------------------------------
+# Error handling: send Email
+# ----------------------------------------
+def send_email(error_msg: str, subject: str, email_recipient: str, email_sender: str, logger: logging.Logger):
     try:
         msg = MIMEText(error_msg)
         msg["Subject"] = subject
@@ -76,8 +94,9 @@ def send_email(error_msg: str, subject: str, email_recipient: str, email_sender:
         # Uses local sendmail
         with subprocess.Popen(["/usr/sbin/sendmail", "-t", "-oi"], stdin=subprocess.PIPE) as p:
             p.communicate(msg.as_string().encode("utf-8"))
+        try_log(logger, f"Email has been sent successfully.", LogLevel.INFO)
     except Exception as e:
-            logging.error(f"Failed to send email: {e}")
+        try_log(logger, f"Failed to sent email: {e}", LogLevel.ERROR)
 
 # ----------------------------------------
 # Main loop
@@ -91,10 +110,14 @@ def main():
     parser.add_argument("--error-email-recipient", default=os.getenv("ERROR_EMAIL_RECIPIENT", ""))
     parser.add_argument("--error-email-sender", default=os.getenv("ERROR_EMAIL_SENDER", ""))
     parser.add_argument("--log-file", default=os.getenv("LOG_FILE", "/app/error.log"))
+    parser.add_argument("--exit-on-max-attempts", type=bool, default=bool(os.getenv("EXIT_ON_MAX_ATTEMPTS", False)))
     parser.add_argument("--max-attempts", type=int, default=int(os.getenv("MAX_ATTEMPTS", "5")))
     parser.add_argument("--base-delay", type=int, default=int(os.getenv("BASE_DELAY", "2")))
-    args = parser.parse_args()
+    args = parser.parse_args()       
 
+    # ----------------------------------------
+    # Initialization & Boundary check
+    # ----------------------------------------
     handlers = [logging.StreamHandler()]
 
     try:
@@ -103,16 +126,33 @@ def main():
         print(f"⚠️ Failed to create file handler: {e}")
         return
 
+    logger = logging.getLogger(__name__)
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s: %(message)s",
-        handlers=[
-            logging.StreamHandler(),
-            logging.FileHandler(args.log_file, mode="a")
-        ]
+        handlers=handlers
     )
+
+    max_attempts_limit = 0
+    if args.max_attempts < max_attempts_limit:
+        error_message = f"{args.max_attempts} < {max_attempts_limit}"
+        try_log(logger, error_message, LogLevel.ERROR)
+        raise RuntimeError(error_message)
+
+    base_delay_limit = 2
+    if args.base_delay < 2:
+        error_message = f"{args.base_delay} < {base_delay_limit}"
+        try_log(logger, error_message, LogLevel.ERROR)
+        raise RuntimeError(error_message)
     
-    logging.info("Starting deployment watcher...")
+    if not bool(args.error_email_recipient):
+        try_log(logger, "Parameter error_email_recipient is invalid. Emails won't be sent.", LogLevel.WARNING)
+    
+    try_log(logger, "Starting deployment watcher...", LogLevel.INFO)
+
+    # ----------------------------------------
+    # Application Logic
+    # ----------------------------------------
     consecutive_failures = 0
 
     while True:
@@ -121,30 +161,36 @@ def main():
                 git_pull(args.repo_dir, args.branch, args.remote),
                 max_attempts=args.max_attempts,
                 base_delay=args.base_delay,
+                logger=logger,
                 task_name="git pull"
             )
 
             if "Already up to date." not in pull_output:
-                logging.info("Changes detected, rebuilding containers...")
+                try_log(logger, "Changes detected, rebuilding containers...", LogLevel.INFO)
                 retry(
                     docker_compose_up(args.repo_dir),
                     max_attempts=args.max_attempts,
                     base_delay=args.base_delay,
+                    logger=logger,
                     task_name="docker-compose"
                 )
             consecutive_failures = 0  # reset after success
 
         except Exception as e:
             consecutive_failures += 1
-            logging.warning(f"Deployment attempt failed ({consecutive_failures}/{args.max_attempts}): {e}")
+            try_log(logger, f"Deployment attempt failed ({consecutive_failures}/{args.max_attempts}): {e}")
             if consecutive_failures >= args.max_attempts:
-                send_email(
-                    error_msg=f"Deployment failed {args.max_attempts} times in a row: {e}", 
-                    subject="Deployment failed", 
-                    email_recipient=args.error_email_recipient, 
-                    email_sender=args.error_email_sender or "error@localhost"
-                )
-                consecutive_failures = 0  # reset after logging/email
+                if bool(args.error_email_recipient):
+                    send_email(
+                        error_msg=f"Deployment failed {args.max_attempts} times in a row: {e}", 
+                        subject="Deployment failed", 
+                        email_recipient=args.error_email_recipient, 
+                        email_sender=args.error_email_sender or "error@localhost",
+                        logger=logger
+                    )
+                if args.exit_on_max_attempts:
+                    RuntimeError("Max attempts reached... Exiting Application.")
+                consecutive_failures = 0
 
         time.sleep(args.interval)
 
