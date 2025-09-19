@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 import argparse
 import os
 import subprocess
@@ -53,21 +53,31 @@ def docker_compose_up(repo_dir):
 # ----------------------------------------
 # Error handling
 # ----------------------------------------
-def log_and_email(error_msg, email_recipient):
-    logging.error(error_msg)
-    if not email_recipient:
+def send_email(error_msg: str, subject: str, email_recipient: str, email_sender: str):
+    missing = {
+        "error_msg": error_msg,
+        "email_recipient": email_recipient,
+        "subject": subject,
+        "email_sender": email_sender,
+    }
+
+    if not all(missing.values()):
+        for name, value in missing.items():
+            if not value:
+                logging.error(f"missing parameter {name}")
         return
+
     try:
         msg = MIMEText(error_msg)
-        msg["Subject"] = "Deployment Script Error"
-        msg["From"] = "noreply@localhost"
+        msg["Subject"] = subject
+        msg["From"] = email_sender
         msg["To"] = email_recipient
 
         # Uses local sendmail
         with subprocess.Popen(["/usr/sbin/sendmail", "-t", "-oi"], stdin=subprocess.PIPE) as p:
             p.communicate(msg.as_string().encode("utf-8"))
     except Exception as e:
-        logging.error(f"Failed to send email: {e}")
+            logging.error(f"Failed to send email: {e}")
 
 # ----------------------------------------
 # Main loop
@@ -78,11 +88,20 @@ def main():
     parser.add_argument("--branch", default=os.getenv("BRANCH", "main"))
     parser.add_argument("--remote", default=os.getenv("REMOTE", "origin"))
     parser.add_argument("--interval", type=int, default=int(os.getenv("INTERVAL", "60")))
-    parser.add_argument("--email", default=os.getenv("ERROR_EMAIL", ""))
+    parser.add_argument("--error-email-recipient", default=os.getenv("ERROR_EMAIL_RECIPIENT", ""))
+    parser.add_argument("--error-email-sender", default=os.getenv("ERROR_EMAIL_SENDER", ""))
     parser.add_argument("--log-file", default=os.getenv("LOG_FILE", "/app/error.log"))
     parser.add_argument("--max-attempts", type=int, default=int(os.getenv("MAX_ATTEMPTS", "5")))
     parser.add_argument("--base-delay", type=int, default=int(os.getenv("BASE_DELAY", "2")))
     args = parser.parse_args()
+
+    handlers = [logging.StreamHandler()]
+
+    try:
+        handlers.append(logging.FileHandler(args.log_file, mode="a"))
+    except Exception as e:
+        print(f"⚠️ Failed to create file handler: {e}")
+        return
 
     logging.basicConfig(
         level=logging.INFO,
@@ -92,7 +111,7 @@ def main():
             logging.FileHandler(args.log_file, mode="a")
         ]
     )
-
+    
     logging.info("Starting deployment watcher...")
     consecutive_failures = 0
 
@@ -119,7 +138,12 @@ def main():
             consecutive_failures += 1
             logging.warning(f"Deployment attempt failed ({consecutive_failures}/{args.max_attempts}): {e}")
             if consecutive_failures >= args.max_attempts:
-                log_and_email(f"Deployment failed {args.max_attempts} times in a row: {e}", args.email)
+                send_email(
+                    error_msg=f"Deployment failed {args.max_attempts} times in a row: {e}", 
+                    subject="Deployment failed", 
+                    email_recipient=args.error_email_recipient, 
+                    email_sender=args.error_email_sender or "error@localhost"
+                )
                 consecutive_failures = 0  # reset after logging/email
 
         time.sleep(args.interval)
