@@ -29,7 +29,7 @@ The script requires the following to be installed on the host system:
 
 ---
 
-## Arguments / Environment Variables
+## Deployment Watcher: Arguments / Environment Variables
 The script supports both command-line arguments and environment variables. Environment variables are used as defaults if the corresponding CLI argument is not provided.
 
 | Argument                  | Environment Variable    | Type | Default          | Description                                       |
@@ -49,7 +49,7 @@ The script supports both command-line arguments and environment variables. Envir
 
 ## Example Usage
 
-### Using Environment Variables (Docker-friendly)
+### Deployment Watcher: Using Environment Variables (Docker-friendly)
 ```bash
 export REPO_DIR=/app/repo
 export BRANCH=main
@@ -60,4 +60,74 @@ export LOG_FILE=/app/error.log
 export MAX_ATTEMPTS=5
 export BASE_DELAY=2
 
-python3 deployment_watcher.py
+## ssh_pubadder.sh: Arguments / Environment Variables
+Argument	Environment Variable	Type	Default	Description
+None	KEY_NAME	string	deploy_key	Base name for the public key file (without .pub). Script looks for ${SSH_DIR}/${KEY_NAME}.pub when PUBLIC_KEY is not set.
+None	PUBLIC_KEY	string	empty	Public key content (single-line SSH public key). If set, this value is used instead of reading a .pub file.
+None	SSH_DIR	path	$HOME/.ssh	Directory containing the public key file and authorized_keys. Can be used to target a non-standard .ssh location.
+None	HOME	path	system user home (from environment or getent)	Fallback home directory used to compute SSH_DIR when SSH_DIR is not provided.
+None	AUTHORIZED_KEYS	path	${SSH_DIR}/authorized_keys	Path where the public key will be appended. Documented for clarity; normally not set by users.
+
+---
+
+## Example Usage
+
+### ssh_pubadder.sh: Using Environment Variables (Docker-friendly)
+```bash
+# Provide the public key directly (Docker-friendly)
+docker run --rm \
+  -e PUBLIC_KEY="ssh-ed25519 AAAA... user@example.com" \
+  -e KEY_NAME=deploy_key \
+  your-image-name \
+  /path/to/ssh_pubadder.sh
+
+# Use a public key file placed in the user's .ssh directory
+docker run --rm \
+  -v /host/path/to/ssh:/root/.ssh:ro \
+  -e KEY_NAME=my_key \
+  your-image-name \
+  /path/to/ssh_pubadder.sh
+
+# Override the SSH directory (useful in containers or CI)
+docker run --rm \
+  -e PUBLIC_KEY="ssh-ed25519 AAAA... user@example.com" \
+  -e SSH_DIR=/tmp/custom_ssh \
+  -e KEY_NAME=ci_key \
+  your-image-name \
+  /path/to/ssh_pubadder.sh
+...
+
+```bash
+# Provide the public key directly (Docker-friendly)
+docker run --rm \
+  -e PUBLIC_KEY="ssh-ed25519 AAAA... user@example.com" \
+  -e KEY_NAME=deploy_key \
+  your-image-name \
+  /path/to/ssh_pubadder.sh
+
+# Use a public key file placed in the user's .ssh directory
+docker run --rm \
+  -v /host/path/to/ssh:/root/.ssh:ro \
+  -e KEY_NAME=my_key \
+  your-image-name \
+  /path/to/ssh_pubadder.sh
+
+# Override the SSH directory (useful in containers or CI)
+docker run --rm \
+  -e PUBLIC_KEY="ssh-ed25519 AAAA... user@example.com" \
+  -e SSH_DIR=/tmp/custom_ssh \
+  -e KEY_NAME=ci_key \
+  your-image-name \
+  /path/to/ssh_pubadder.sh
+
+# Local Shell examples
+# Use PUBLIC_KEY from environment
+PUBLIC_KEY="ssh-ed25519 AAAA... user@example.com" KEY_NAME=deploy_key ./ssh_pubadder.sh
+
+# Place a file at ~/.ssh/deploy_key.pub and run
+KEY_NAME=deploy_key ./ssh_pubadder.sh
+
+# Use a custom .ssh directory
+SSH_DIR=/srv/keys PUBLIC_KEY="ssh-ed25519 AAAA... user@example.com" ./ssh_pubadder.sh
+...
+
