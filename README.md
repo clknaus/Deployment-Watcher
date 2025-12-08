@@ -59,6 +59,7 @@ export ERROR_EMAIL=alerts@example.com
 export LOG_FILE=/app/error.log
 export MAX_ATTEMPTS=5
 export BASE_DELAY=2
+```
 
 ## ssh_pubadder.sh: Arguments / Environment Variables
 Argument	Environment Variable	Type	Default	Description
@@ -95,6 +96,7 @@ docker run --rm \
   -e KEY_NAME=ci_key \
   your-image-name \
   /path/to/ssh_pubadder.sh
+```
 ...
 
 ```bash
