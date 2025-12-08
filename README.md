@@ -60,13 +60,3 @@ export LOG_FILE=/app/error.log
 export MAX_ATTEMPTS=5
 export BASE_DELAY=2
 ```
-
-## ssh_pubadder.sh: Arguments / Environment Variables
-Argument	Environment Variable	Type	Default	Description
-None	KEY_NAME	string	deploy_key	Base name for the public key file (without .pub). Script looks for ${SSH_DIR}/${KEY_NAME}.pub when PUBLIC_KEY is not set.
-None	PUBLIC_KEY	string	empty	Public key content (single-line SSH public key). If set, this value is used instead of reading a .pub file.
-None	SSH_DIR	path	$HOME/.ssh	Directory containing the public key file and authorized_keys. Can be used to target a non-standard .ssh location.
-None	HOME	path	system user home (from environment or getent)	Fallback home directory used to compute SSH_DIR when SSH_DIR is not provided.
-None	AUTHORIZED_KEYS	path	${SSH_DIR}/authorized_keys	Path where the public key will be appended. Documented for clarity; normally not set by users.
-
----
