@@ -1,12 +1,16 @@
 ﻿#!/usr/bin/env python3
 import argparse
 import datetime
+from email import parser
 from enum import Enum
 import os
 import subprocess
 import time
 import logging
 from email.mime.text import MIMEText
+from typing import Callable, Any
+
+parser.add_argument("--exit-on-max-attempts", action="store_true", default=os.getenv("EXIT_ON_MAX_ATTEMPTS", "false").lower() in ("1","true","yes"))
 
 class LogLevel(Enum):
     DEBUG = logging.DEBUG
@@ -18,7 +22,7 @@ class LogLevel(Enum):
 # ----------------------------------------
 # Retry with periodically exponential base_delay^attempts backoff
 # ----------------------------------------
-def retry(func: function, max_attempts: int, base_delay: int,  logger: logging.Logger, task_name="task"):
+def retry(func: Callable[[], Any], max_attempts: int, base_delay: int, logger: logging.Logger, task_name: str = "task") -> Any:
     attempts = 0
     while attempts < max_attempts:
         try:
@@ -29,6 +33,7 @@ def retry(func: function, max_attempts: int, base_delay: int,  logger: logging.L
             try_log(logger, f"{task_name} failed (attempt {attempts}/{max_attempts}): {e}", LogLevel.WARNING)
             time.sleep(delay)
     raise RuntimeError(f"{task_name} failed after {max_attempts} attempts")
+
 
 # ----------------------------------------
 # Git + Docker logic
@@ -96,7 +101,7 @@ def send_email(error_msg: str, subject: str, email_recipient: str, email_sender:
             p.communicate(msg.as_string().encode("utf-8"))
         try_log(logger, f"Email has been sent successfully.", LogLevel.INFO)
     except Exception as e:
-        try_log(logger, f"Failed to sent email: {e}", LogLevel.ERROR)
+        try_log(logger, f"Failed to send email: {e}", LogLevel.ERROR)
 
 # ----------------------------------------
 # Main loop
@@ -178,7 +183,7 @@ def main():
 
         except Exception as e:
             consecutive_failures += 1
-            try_log(logger, f"Deployment attempt failed ({consecutive_failures}/{args.max_attempts}): {e}")
+            try_log(logger, f"Deployment attempt failed ({consecutive_failures}/{args.max_attempts}): {e}", LogLevel.ERROR)
             if consecutive_failures >= args.max_attempts:
                 if bool(args.error_email_recipient):
                     send_email(
