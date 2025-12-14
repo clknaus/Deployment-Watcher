@@ -10,8 +10,6 @@ import logging
 from email.mime.text import MIMEText
 from typing import Callable, Any
 
-parser.add_argument("--exit-on-max-attempts", action="store_true", default=os.getenv("EXIT_ON_MAX_ATTEMPTS", "false").lower() in ("1","true","yes"))
-
 class LogLevel(Enum):
     DEBUG = logging.DEBUG
     INFO = logging.INFO
@@ -115,7 +113,7 @@ def main():
     parser.add_argument("--error-email-recipient", default=os.getenv("ERROR_EMAIL_RECIPIENT", ""))
     parser.add_argument("--error-email-sender", default=os.getenv("ERROR_EMAIL_SENDER", ""))
     parser.add_argument("--log-file", default=os.getenv("LOG_FILE", "/app/error.log"))
-    parser.add_argument("--exit-on-max-attempts", type=bool, default=bool(os.getenv("EXIT_ON_MAX_ATTEMPTS", False)))
+    parser.add_argument("--exit-on-max-attempts", action="store_true", default=os.getenv("EXIT_ON_MAX_ATTEMPTS", "false").lower() in ("1","true","yes"))
     parser.add_argument("--max-attempts", type=int, default=int(os.getenv("MAX_ATTEMPTS", "5")))
     parser.add_argument("--base-delay", type=int, default=int(os.getenv("BASE_DELAY", "2")))
     args = parser.parse_args()       
